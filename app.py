@@ -1,223 +1,190 @@
-import pandas as pd
-import plotly.express as px
+from __future__ import annotations
+
 import streamlit as st
 
+from src.charts import (
+    create_revenue_by_category_chart,
+    create_revenue_by_product_chart,
+    create_revenue_over_time_chart,
+    create_units_by_product_chart,
+    render_kpi_cards,
+    render_sales_table,
+)
+from src.data_loader import load_sales_data
+from src.filters import apply_filters, render_sidebar_filters
+from src.metrics import build_summary_report, build_top_bottom_products, calculate_kpi_metrics
+from src.utils import get_download_button_csv
+
 # -----------------------
-# Page Configuration
+# Page configuration
 # -----------------------
 st.set_page_config(
-    page_title="Belal's Sales Dashboard",
-    page_icon="📊",
+    page_title="Belal Sales Intelligence Dashboard",
+    page_icon="📈",
     layout="wide",
 )
 
-st.title("📊 Belal's Sales Dashboard")
-st.caption("Interactive Sales Performance Dashboard")
-
-# -----------------------
-# Load Data
-# -----------------------
-df = pd.read_csv("data/sales.csv")
-
-df["Date"] = pd.to_datetime(df["Date"])
-df["Revenue"] = df["Quantity"] * df["Price"]
-
-# -----------------------
-# Sidebar Filters
-# -----------------------
-st.sidebar.header("Filters")
-
-selected_categories = st.sidebar.multiselect(
-    "Choose Categories",
-    options=sorted(df["Category"].unique()),
-    default=sorted(df["Category"].unique()),
+st.markdown(
+    """
+    <style>
+    .main {
+        background: linear-gradient(180deg, #020617 0%, #111827 100%);
+        color: #e5e7eb;
+    }
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 1rem;
+        margin: 1rem 0 1.5rem 0;
+    }
+    .metric-card {
+        background: linear-gradient(160deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.92));
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 18px;
+        padding: 1rem 1.1rem;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.45);
+    }
+    .metric-label {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #93c5fd;
+        margin-bottom: 0.7rem;
+    }
+    .metric-value {
+        font-size: 1.65rem;
+        font-weight: 800;
+        color: #f8fafc;
+        margin-bottom: 0.45rem;
+    }
+    .metric-subtitle {
+        font-size: 0.82rem;
+        color: #94a3b8;
+    }
+    .section-label {
+        font-size: 0.9rem;
+        color: #7dd3fc;
+        font-weight: 700;
+        margin-bottom: 0.55rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-selected_products = st.sidebar.multiselect(
-    "Choose Products",
-    options=sorted(df["Product"].unique()),
-    default=sorted(df["Product"].unique()),
+# -----------------------
+# Header
+# -----------------------
+st.title("📈 Belal Sales Intelligence Dashboard")
+st.caption("Portfolio-grade sales analytics with clean filters, premium visuals, and export-ready reporting.")
+
+# -----------------------
+# Data source selection
+# -----------------------
+st.sidebar.markdown("### Data source")
+source_option = st.sidebar.radio(
+    "Choose dataset",
+    options=["Default sales data", "Upload CSV file"],
+    horizontal=True,
 )
 
-start_date = st.sidebar.date_input(
-    "Start Date",
-    value=df["Date"].min().date(),
-)
+uploaded_file = None
+if source_option == "Upload CSV file":
+    uploaded_file = st.sidebar.file_uploader(
+        "Upload a sales CSV file",
+        type=["csv"],
+        help="Required columns: Date, Product, Category, Quantity, Price",
+    )
+    if uploaded_file is None:
+        st.info("Choose a CSV file to use the upload mode, or switch back to the default sales dataset.")
+        st.stop()
 
-end_date = st.sidebar.date_input(
-    "End Date",
-    value=df["Date"].max().date(),
-)
-
-if start_date > end_date:
-    st.error("Start date cannot be after end date.")
+# -----------------------
+# Load data with safe validation
+# -----------------------
+try:
+    df = load_sales_data(uploaded_file)
+except Exception as exc:
+    st.error(f"Unable to load the sales data: {exc}")
+    st.info("Please upload a CSV file that contains Date, Product, Category, Quantity, and Price columns.")
     st.stop()
 
 # -----------------------
-# Apply Filters
+# Sidebar filters
 # -----------------------
-filtered_df = df[
-    df["Category"].isin(selected_categories)
-    & df["Product"].isin(selected_products)
-    & (df["Date"].dt.date >= start_date)
-    & (df["Date"].dt.date <= end_date)
-].copy()
+filters = render_sidebar_filters(df)
+filtered_df = apply_filters(df, filters)
 
 if filtered_df.empty:
-    st.warning("No data available.")
+    st.warning("No sales records match the current filters. Try widening the date range or clearing the product/category selection.")
     st.stop()
 
 # -----------------------
-# KPIs
+# KPI metrics
 # -----------------------
-total_revenue = filtered_df["Revenue"].sum()
-total_quantity = filtered_df["Quantity"].sum()
-total_products = filtered_df["Product"].nunique()
-average_sale = filtered_df["Revenue"].mean()
+metrics = calculate_kpi_metrics(filtered_df)
+render_kpi_cards(metrics)
 
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("💰 Revenue", f"${total_revenue:,.0f}")
-col2.metric("🛒 Units Sold", f"{total_quantity:,}")
-col3.metric("📦 Products", total_products)
-col4.metric("📊 Average Sale", f"${average_sale:,.0f}")
-
-st.divider()
+st.subheader("Analysis")
 
 # -----------------------
-# Sales Table
+# Trend selector and charts grid
 # -----------------------
-st.subheader("Sales Data")
-
-display_df = filtered_df.copy()
-display_df["Date"] = display_df["Date"].dt.strftime("%d %b %Y")
-display_df["Price"] = display_df["Price"].map("${:,.2f}".format)
-display_df["Revenue"] = display_df["Revenue"].map("${:,.2f}".format)
-
-st.dataframe(
-    display_df,
-    use_container_width=True,
-    hide_index=True,
+trend_selection = st.radio(
+    "Revenue trend view",
+    options=["Daily", "Weekly", "Monthly"],
+    horizontal=True,
+    key="trend_selector",
 )
 
-st.divider()
+chart_col_1, chart_col_2 = st.columns(2)
+with chart_col_1:
+    st.plotly_chart(create_revenue_by_product_chart(filtered_df), width="stretch")
+with chart_col_2:
+    st.plotly_chart(create_revenue_by_category_chart(filtered_df), width="stretch")
 
-# -----------------------
-# Revenue by Product
-# -----------------------
-st.subheader("Revenue by Product")
-
-revenue_by_product = (
-    filtered_df.groupby("Product", as_index=False)["Revenue"]
-    .sum()
-    .sort_values("Revenue", ascending=False)
-)
-
-fig1 = px.bar(
-    revenue_by_product,
-    x="Product",
-    y="Revenue",
-    text_auto=True,
-)
-
-fig1.update_layout(
-    height=450,
-    xaxis_title="Product",
-    yaxis_title="Revenue ($)",
-)
-
-fig1.update_xaxes(tickangle=-30)
-
-st.plotly_chart(fig1, use_container_width=True)
-
-st.divider()
+chart_col_3, chart_col_4 = st.columns(2)
+with chart_col_3:
+    st.plotly_chart(create_units_by_product_chart(filtered_df), width="stretch")
+with chart_col_4:
+    st.plotly_chart(create_revenue_over_time_chart(filtered_df, trend_selection), width="stretch")
 
 # -----------------------
-# Sales by Category
+# Product ranking tables
 # -----------------------
-st.subheader("Sales by Category")
+ranking_col_1, ranking_col_2 = st.columns(2)
+top_products_df, bottom_products_df = build_top_bottom_products(filtered_df)
 
-category_sales = (
-    filtered_df.groupby("Category", as_index=False)["Revenue"]
-    .sum()
-)
-
-fig2 = px.pie(
-    category_sales,
-    values="Revenue",
-    names="Category",
-    hole=0.5,
-)
-
-fig2.update_layout(height=450)
-
-st.plotly_chart(fig2, use_container_width=True)
-
-st.divider()
+with ranking_col_1:
+    st.subheader("Top 5 products")
+    st.dataframe(top_products_df, width="stretch", hide_index=True)
+with ranking_col_2:
+    st.subheader("Bottom 5 products")
+    st.dataframe(bottom_products_df, width="stretch", hide_index=True)
 
 # -----------------------
-# Revenue Over Time
+# Detailed sales data
 # -----------------------
-st.subheader("Revenue Over Time")
-
-revenue_over_time = (
-    filtered_df.groupby("Date", as_index=False)["Revenue"]
-    .sum()
-    .sort_values("Date")
-)
-
-fig3 = px.line(
-    revenue_over_time,
-    x="Date",
-    y="Revenue",
-    markers=True,
-)
-
-fig3.update_layout(
-    height=450,
-    xaxis_title="Date",
-    yaxis_title="Revenue ($)",
-)
-
-fig3.update_xaxes(
-    tickformat="%d %b",
-    nticks=7,
-)
-
-st.plotly_chart(fig3, use_container_width=True)
-
-st.divider()
+st.subheader("Detailed filtered sales table")
+render_sales_table(filtered_df)
 
 # -----------------------
-# Top Selling Products
+# Exports section
 # -----------------------
-st.subheader("🏆 Top Selling Products")
-
-top_products = (
-    filtered_df.groupby("Product")["Revenue"]
-    .sum()
-    .sort_values(ascending=False)
-    .reset_index()
-)
-
-st.dataframe(
-    top_products,
-    use_container_width=True,
-    hide_index=True,
-)
-
-st.divider()
-
-# -----------------------
-# Download Report
-# -----------------------
-st.subheader("📥 Download Report")
-
-csv = filtered_df.to_csv(index=False).encode("utf-8")
-
-st.download_button(
-    label="Download Filtered Sales CSV",
-    data=csv,
-    file_name="filtered_sales_report.csv",
-    mime="text/csv",
-)
+st.subheader("Exports")
+export_col_1, export_col_2 = st.columns(2)
+with export_col_1:
+    get_download_button_csv(
+        filtered_df,
+        label="Download filtered CSV",
+        file_name="filtered_sales_export.csv",
+    )
+with export_col_2:
+    summary_report_df = build_summary_report(filtered_df)
+    get_download_button_csv(
+        summary_report_df,
+        label="Download summary report CSV",
+        file_name="sales_summary_report.csv",
+    )

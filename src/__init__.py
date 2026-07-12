@@ -1,0 +1,1 @@
+"""Sales dashboard source package."""
