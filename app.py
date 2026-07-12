@@ -1,6 +1,10 @@
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
+# -----------------------
+# Page Configuration
+# -----------------------
 st.set_page_config(
     page_title="Belal's Sales Dashboard",
     page_icon="📊",
@@ -8,49 +12,50 @@ st.set_page_config(
 )
 
 st.title("📊 Belal's Sales Dashboard")
+st.caption("Interactive Sales Performance Dashboard")
 
-# Load data
+# -----------------------
+# Load Data
+# -----------------------
 df = pd.read_csv("data/sales.csv")
 
-# Prepare data
 df["Date"] = pd.to_datetime(df["Date"])
 df["Revenue"] = df["Quantity"] * df["Price"]
 
-# Sidebar filters
+# -----------------------
+# Sidebar Filters
+# -----------------------
 st.sidebar.header("Filters")
 
 selected_categories = st.sidebar.multiselect(
-    "Choose categories",
+    "Choose Categories",
     options=sorted(df["Category"].unique()),
     default=sorted(df["Category"].unique()),
 )
 
 selected_products = st.sidebar.multiselect(
-    "Choose products",
+    "Choose Products",
     options=sorted(df["Product"].unique()),
     default=sorted(df["Product"].unique()),
 )
 
 start_date = st.sidebar.date_input(
-    "Start date",
+    "Start Date",
     value=df["Date"].min().date(),
-    min_value=df["Date"].min().date(),
-    max_value=df["Date"].max().date(),
 )
 
 end_date = st.sidebar.date_input(
-    "End date",
+    "End Date",
     value=df["Date"].max().date(),
-    min_value=df["Date"].min().date(),
-    max_value=df["Date"].max().date(),
 )
 
-# Validate date range
 if start_date > end_date:
-    st.error("Start date cannot be after the end date.")
+    st.error("Start date cannot be after end date.")
     st.stop()
 
-# Apply filters
+# -----------------------
+# Apply Filters
+# -----------------------
 filtered_df = df[
     df["Category"].isin(selected_categories)
     & df["Product"].isin(selected_products)
@@ -58,13 +63,18 @@ filtered_df = df[
     & (df["Date"].dt.date <= end_date)
 ].copy()
 
-# KPI calculations
+if filtered_df.empty:
+    st.warning("No data available.")
+    st.stop()
+
+# -----------------------
+# KPIs
+# -----------------------
 total_revenue = filtered_df["Revenue"].sum()
 total_quantity = filtered_df["Quantity"].sum()
 total_products = filtered_df["Product"].nunique()
-average_sale = filtered_df["Revenue"].mean() if not filtered_df.empty else 0
+average_sale = filtered_df["Revenue"].mean()
 
-# KPI cards
 col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("💰 Revenue", f"${total_revenue:,.0f}")
@@ -74,46 +84,140 @@ col4.metric("📊 Average Sale", f"${average_sale:,.0f}")
 
 st.divider()
 
-# Empty-result message
-if filtered_df.empty:
-    st.warning("No sales data matches the selected filters.")
-    st.stop()
-
-# Clean date display
-display_df = filtered_df.copy()
-display_df["Date"] = display_df["Date"].dt.strftime("%Y-%m-%d")
-
-# Sales table
+# -----------------------
+# Sales Table
+# -----------------------
 st.subheader("Sales Data")
+
+display_df = filtered_df.copy()
+display_df["Date"] = display_df["Date"].dt.strftime("%d %b %Y")
+display_df["Price"] = display_df["Price"].map("${:,.2f}".format)
+display_df["Revenue"] = display_df["Revenue"].map("${:,.2f}".format)
 
 st.dataframe(
     display_df,
-    width="stretch",
+    use_container_width=True,
     hide_index=True,
 )
 
 st.divider()
 
-# Revenue by product
+# -----------------------
+# Revenue by Product
+# -----------------------
 st.subheader("Revenue by Product")
 
 revenue_by_product = (
     filtered_df.groupby("Product", as_index=False)["Revenue"]
     .sum()
-    .set_index("Product")
+    .sort_values("Revenue", ascending=False)
 )
 
-st.bar_chart(revenue_by_product)
+fig1 = px.bar(
+    revenue_by_product,
+    x="Product",
+    y="Revenue",
+    text_auto=True,
+)
+
+fig1.update_layout(
+    height=450,
+    xaxis_title="Product",
+    yaxis_title="Revenue ($)",
+)
+
+fig1.update_xaxes(tickangle=-30)
+
+st.plotly_chart(fig1, use_container_width=True)
 
 st.divider()
 
-# Revenue over time
+# -----------------------
+# Sales by Category
+# -----------------------
+st.subheader("Sales by Category")
+
+category_sales = (
+    filtered_df.groupby("Category", as_index=False)["Revenue"]
+    .sum()
+)
+
+fig2 = px.pie(
+    category_sales,
+    values="Revenue",
+    names="Category",
+    hole=0.5,
+)
+
+fig2.update_layout(height=450)
+
+st.plotly_chart(fig2, use_container_width=True)
+
+st.divider()
+
+# -----------------------
+# Revenue Over Time
+# -----------------------
 st.subheader("Revenue Over Time")
 
 revenue_over_time = (
     filtered_df.groupby("Date", as_index=False)["Revenue"]
     .sum()
-    .set_index("Date")
+    .sort_values("Date")
 )
 
-st.line_chart(revenue_over_time)
+fig3 = px.line(
+    revenue_over_time,
+    x="Date",
+    y="Revenue",
+    markers=True,
+)
+
+fig3.update_layout(
+    height=450,
+    xaxis_title="Date",
+    yaxis_title="Revenue ($)",
+)
+
+fig3.update_xaxes(
+    tickformat="%d %b",
+    nticks=7,
+)
+
+st.plotly_chart(fig3, use_container_width=True)
+
+st.divider()
+
+# -----------------------
+# Top Selling Products
+# -----------------------
+st.subheader("🏆 Top Selling Products")
+
+top_products = (
+    filtered_df.groupby("Product")["Revenue"]
+    .sum()
+    .sort_values(ascending=False)
+    .reset_index()
+)
+
+st.dataframe(
+    top_products,
+    use_container_width=True,
+    hide_index=True,
+)
+
+st.divider()
+
+# -----------------------
+# Download Report
+# -----------------------
+st.subheader("📥 Download Report")
+
+csv = filtered_df.to_csv(index=False).encode("utf-8")
+
+st.download_button(
+    label="Download Filtered Sales CSV",
+    data=csv,
+    file_name="filtered_sales_report.csv",
+    mime="text/csv",
+)
